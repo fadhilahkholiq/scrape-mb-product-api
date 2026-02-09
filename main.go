@@ -45,13 +45,16 @@ type ArticleDetail struct {
 	Products []ProductComparison `json:"products"`
 }
 
+// UPDATE: Struktur Data Produk
 type ProductComparison struct {
-	Rank        int    `json:"rank"`
-	BrandName   string `json:"brand_name"`
-	ProductName string `json:"product_name"`
-	ImageURL    string `json:"image_url"`
-	Point       string `json:"point"`
-	ShopeeLink  string `json:"shopee_link"`
+	Rank        int      `json:"rank"`
+	BrandName   string   `json:"brand_name"`
+	ProductName string   `json:"product_name"`
+	Price       string   `json:"price"`
+	Images      []string `json:"images"`    // Semua Gambar (Array)
+	ImageURL    string   `json:"image_url"` // Gambar Utama (String) - DIPERBAIKI
+	Point       string   `json:"point"`
+	ShopeeLink  string   `json:"shopee_link"`
 }
 
 type HtmlExtraData struct {
@@ -82,6 +85,9 @@ type JsonArticle struct {
 				Brand struct {
 					Name string `json:"name"`
 				} `json:"brand"`
+				Offers struct {
+					LowPrice interface{} `json:"lowPrice"`
+				} `json:"offers"`
 			} `json:"item"`
 		} `json:"itemListElement"`
 	} `json:"mainEntity"`
@@ -105,68 +111,74 @@ func extractRankInt(s string) int {
 	return 0
 }
 
+func formatRupiah(rawPrice interface{}) string {
+	if rawPrice == nil {
+		return ""
+	}
+	var priceStr string
+	switch v := rawPrice.(type) {
+	case string:
+		priceStr = v
+	case float64:
+		priceStr = fmt.Sprintf("%.0f", v)
+	case int:
+		priceStr = fmt.Sprintf("%d", v)
+	default:
+		return ""
+	}
+	re := regexp.MustCompile(`[^0-9]`)
+	cleanNum := re.ReplaceAllString(priceStr, "")
+	if cleanNum == "" {
+		return ""
+	}
+	num, _ := strconv.Atoi(cleanNum)
+	p := messagePrinter(num)
+	return "Rp " + p
+}
+
+func messagePrinter(n int) string {
+	s := strconv.Itoa(n)
+	if len(s) <= 3 {
+		return s
+	}
+	var result []byte
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result = append(result, '.')
+		}
+		result = append(result, byte(c))
+	}
+	return string(result)
+}
+
 func processShopeeLink(originalLink string) string {
 	myAffiliateID := "11379810076"
-
 	parsedURL, err := url.Parse(originalLink)
 	if err != nil {
 		return ""
 	}
-
 	var targetURLStr string
-
 	if strings.Contains(parsedURL.Host, "atid.me") {
 		targetURLStr = parsedURL.Query().Get("url")
 	} else {
 		targetURLStr = originalLink
 	}
-
 	if !strings.Contains(strings.ToLower(targetURLStr), "shopee") {
 		return ""
 	}
-
 	shopeeURL, err := url.Parse(targetURLStr)
 	if err != nil {
 		return ""
 	}
-
 	params := shopeeURL.Query()
 	params.Set("affiliate_id", myAffiliateID)
 	shopeeURL.RawQuery = params.Encode()
-
 	return shopeeURL.String()
 }
 
-// --- NEW HANDLER: HOME (ROOT) ---
-func homeHandler(w http.ResponseWriter, r *http.Request) {
-	// Pastikan hanya merespons path "/" persis.
-	// Jika user akses /halaman-ngawur, return 404.
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-
-	response := map[string]interface{}{
-		"status":  "active",
-		"message": "Running",
-		"version": "1.0.0",
-		"endpoints": map[string]string{
-			"list_articles":  "/api",
-			"detail_article": "/api/detail/{id}",
-		},
-		"author": "Kholiq Fadhilah",
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	encoder := json.NewEncoder(w)
-	encoder.SetIndent("", "  ")
-	encoder.Encode(response)
-}
-
-// --- ROUTER API ---
+// --- ROUTER ---
 func mainRouteHandler(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-
 	if len(parts) >= 3 && parts[1] == "detail" {
 		handleDetailScrape(w, parts[2])
 	} else {
@@ -182,25 +194,21 @@ func mainRouteHandler(w http.ResponseWriter, r *http.Request) {
 
 // --- HANDLER LIST ---
 func handleListScrape(w http.ResponseWriter, page int) {
-	baseURL := "/api"
-
+	baseURL := "http://localhost:8080/api"
 	response := ApiResponse{
 		Meta: MetaData{CurrentPage: page, TotalPages: 0},
 		Data: []ArticlePreview{},
 	}
-
 	c := colly.NewCollector(
 		colly.AllowedDomains("id.my-best.com"),
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"),
 	)
-
 	seen := make(map[string]bool)
 	c.OnHTML("div[data-testid='content_list_item']", func(e *colly.HTMLElement) {
 		link := e.ChildAttr("a", "href")
 		title := cleanText(e.DOM.Find("h2"))
 		parts := strings.Split(link, "/")
 		id := parts[len(parts)-1]
-
 		if id != "" && !seen[id] {
 			seen[id] = true
 			response.Data = append(response.Data, ArticlePreview{
@@ -211,7 +219,6 @@ func handleListScrape(w http.ResponseWriter, page int) {
 			})
 		}
 	})
-
 	c.OnHTML("nav[role='navigation'] li", func(e *colly.HTMLElement) {
 		text := cleanText(e.DOM)
 		if num, err := strconv.Atoi(text); err == nil {
@@ -220,13 +227,11 @@ func handleListScrape(w http.ResponseWriter, page int) {
 			}
 		}
 	})
-
 	targetURL := "https://id.my-best.com/presses"
 	if page > 1 {
 		targetURL = fmt.Sprintf("https://id.my-best.com/presses?page=%d", page)
 	}
 	c.Visit(targetURL)
-
 	if response.Meta.TotalPages > 0 {
 		response.Meta.LastPageURL = fmt.Sprintf("%s/%d", baseURL, response.Meta.TotalPages)
 		if page < response.Meta.TotalPages {
@@ -242,7 +247,6 @@ func handleListScrape(w http.ResponseWriter, page int) {
 			}
 		}
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	encoder := json.NewEncoder(w)
 	encoder.SetEscapeHTML(false)
@@ -258,9 +262,7 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 		ID:       id,
 		Products: []ProductComparison{},
 	}
-
 	htmlDataMap := make(map[int]HtmlExtraData)
-
 	c := colly.NewCollector(
 		colly.AllowedDomains("id.my-best.com"),
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"),
@@ -270,7 +272,6 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 	c.OnHTML("table[data-testid='comparison-table'] tbody tr", func(e *colly.HTMLElement) {
 		rankText := cleanText(e.DOM.Find("td").Eq(0))
 		rank := extractRankInt(rankText)
-
 		if rank > 0 {
 			var shopeeLink string
 			e.DOM.Find("td").Eq(3).Find("a").Each(func(_ int, s *goquery.Selection) {
@@ -291,7 +292,6 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 	// 2. PHASE JSON-LD
 	c.OnHTML("script[type='application/ld+json']", func(e *colly.HTMLElement) {
 		content := e.Text
-
 		if strings.Contains(content, "BreadcrumbList") {
 			var bc JsonBreadcrumb
 			if err := json.Unmarshal([]byte(content), &bc); err == nil {
@@ -300,13 +300,11 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 				}
 			}
 		}
-
 		if strings.Contains(content, "\"Article\"") && strings.Contains(content, "mainEntity") {
 			var art JsonArticle
 			if err := json.Unmarshal([]byte(content), &art); err == nil {
 				detail.Title = art.Headline
 				detail.Intro = art.Description
-
 				for _, entity := range art.MainEntity {
 					if entity.Type == "ItemList" {
 						for _, item := range entity.ItemListElement {
@@ -314,7 +312,6 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 							brandName := item.Item.Brand.Name
 							fullName := item.Item.Name
 							productName := fullName
-
 							if strings.Contains(fullName, "\n") {
 								parts := strings.Split(fullName, "\n")
 								if len(parts) > 1 {
@@ -325,10 +322,18 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 								productName = strings.TrimSpace(productName)
 							}
 
+							// Ambil Gambar Utama untuk field ImageURL
 							imgURL := ""
 							if len(item.Item.Image) > 0 {
 								imgURL = item.Item.Image[0]
 							}
+
+							// Ambil Semua Gambar
+							images := item.Item.Image
+
+							// Ambil Harga
+							rawPrice := item.Item.Offers.LowPrice
+							priceFormatted := formatRupiah(rawPrice)
 
 							extras := htmlDataMap[rank]
 
@@ -336,11 +341,12 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 								Rank:        rank,
 								BrandName:   brandName,
 								ProductName: productName,
-								ImageURL:    imgURL,
+								Price:       priceFormatted,
+								Images:      images, // Semua Gambar
+								ImageURL:    imgURL, // Gambar Utama (Fix Error disini)
 								Point:       extras.Point,
 								ShopeeLink:  extras.ShopeeLink,
 							}
-
 							detail.Products = append(detail.Products, prod)
 						}
 					}
@@ -348,12 +354,9 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 			}
 		}
 	})
-
 	fmt.Printf("Scraping Detail ID %s...\n", id)
 	c.Visit(fmt.Sprintf("https://id.my-best.com/%s", id))
-
 	w.Header().Set("Content-Type", "application/json")
-
 	encoder := json.NewEncoder(w)
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
@@ -362,18 +365,30 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 	}
 }
 
-func main() {
-	// ROUTE HOME (ROOT)
-	http.HandleFunc("/", homeHandler)
+func homeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	response := map[string]interface{}{
+		"status":  "active",
+		"message": "MyBest Scraper API is Running!",
+		"version": "1.3.0",
+		"endpoints": map[string]string{
+			"list_articles":  "http://localhost:8080/api",
+			"detail_article": "http://localhost:8080/api/detail/{id}",
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	encoder.Encode(response)
+}
 
-	// ROUTE API
+func main() {
+	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/api/", mainRouteHandler)
 	http.HandleFunc("/api", mainRouteHandler)
-
 	fmt.Println("Server Ready di http://localhost:8080")
-	fmt.Println("- Home:   http://localhost:8080")
-	fmt.Println("- List:   http://localhost:8080/api")
-	fmt.Println("- Detail: http://localhost:8080/api/detail/{id}")
-
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
