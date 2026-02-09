@@ -194,7 +194,7 @@ func mainRouteHandler(w http.ResponseWriter, r *http.Request) {
 
 // --- HANDLER LIST ---
 func handleListScrape(w http.ResponseWriter, page int) {
-	baseURL := "http://localhost:8080/api"
+	baseURL := "/api"
 	response := ApiResponse{
 		Meta: MetaData{CurrentPage: page, TotalPages: 0},
 		Data: []ArticlePreview{},
@@ -375,8 +375,8 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		"message": "MyBest Scraper API is Running!",
 		"version": "1.3.0",
 		"endpoints": map[string]string{
-			"list_articles":  "http://localhost:8080/api",
-			"detail_article": "http://localhost:8080/api/detail/{id}",
+			"list_articles":  "/api",
+			"detail_article": "/api/detail/{id}",
 		},
 	}
 	w.Header().Set("Content-Type", "application/json")
