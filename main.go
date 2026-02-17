@@ -553,6 +553,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		"status":  "active",
 		"message": "API is running!",
 		"version": "2.3.0",
+		"author":  "KF",
 		"endpoints": map[string]string{
 			"list_articles":   "/api",
 			"list_categories": "/api/categories",
