@@ -336,9 +336,8 @@ curl http://localhost:8080/api/detail/12345
 # ⚠️ Catatan Penting
 
 - Dibuat hanya untuk tujuan pembelajaran.
+- Bukan untuk tujuan production.
 - API ini berbasis scraping.
 - Jika struktur web sumber berubah, API bisa terdampak.
 - Tidak ada rate limiting bawaan.
 - Tidak ada authentication.
-- Disarankan menggunakan caching untuk production.
-- Disarankan deploy di belakang reverse proxy.
