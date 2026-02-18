@@ -1,6 +1,6 @@
 # 📦 MyBest Scraper API
 
-REST API berbasis Golang untuk melakukan scraping daftar rekomendasi produk dari **id.my-best.com**, kemudian menyajikannya dalam format JSON.
+REST API berbasis Golang untuk melakukan scraping daftar rekomendasi produk dari **mybest**, kemudian menyajikannya dalam format JSON.
 
 API ini mendukung:
 
