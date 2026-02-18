@@ -230,7 +230,8 @@ func handleListScrape(w http.ResponseWriter, page int) {
 		title := cleanText(e.DOM.Find("h2"))
 		parts := strings.Split(link, "/")
 		id := parts[len(parts)-1]
-		if id != "" && !seen[id] {
+
+		if id != "" && title != "" && !seen[id] {
 			seen[id] = true
 			response.Data = append(response.Data, ArticlePreview{
 				Title:      title,
@@ -399,7 +400,8 @@ func handleCategoryArticles(w http.ResponseWriter, categorySlug string, page int
 		title := cleanText(e.DOM.Find("h2"))
 		parts := strings.Split(link, "/")
 		id := parts[len(parts)-1]
-		if id != "" && !seen[id] {
+
+		if id != "" && title != "" && !seen[id] {
 			seen[id] = true
 			response.Data = append(response.Data, ArticlePreview{
 				Title:      title,
@@ -533,7 +535,7 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 			}
 		}
 	})
-	fmt.Printf("Scraping detail ID %s\n", id)
+	fmt.Printf("Scraping detail ID %s!\n", id)
 	c.Visit(fmt.Sprintf("https://id.my-best.com/%s", id))
 	w.Header().Set("Content-Type", "application/json")
 	encoder := json.NewEncoder(w)
@@ -552,7 +554,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"status":  "active",
 		"message": "API is running!",
-		"version": "2.3.0",
+		"version": "3.3.0",
 		"author":  "KF",
 		"endpoints": map[string]string{
 			"list_articles":   "/api",
@@ -571,6 +573,6 @@ func main() {
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/api/", mainRouteHandler)
 	http.HandleFunc("/api", mainRouteHandler)
-	fmt.Println("Server running!")
+	fmt.Println("Server is running!")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
