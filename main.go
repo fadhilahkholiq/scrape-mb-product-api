@@ -62,6 +62,7 @@ type ProductComparison struct {
 	Images      []string `json:"images"`
 	ImageURL    string   `json:"image_url"`
 	Point       string   `json:"point"`
+	PointList   []string `json:"point_list"`
 	ShopeeLink  string   `json:"shopee_link"`
 }
 
@@ -451,32 +452,62 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 		ID:       id,
 		Products: []ProductComparison{},
 	}
-	htmlDataMap := make(map[int]HtmlExtraData)
+	type ExtractedData struct {
+		Point     string
+		PointList []string
+	}
+	shopeeLinksMap := make(map[int]string)
+	extractedDataMap := make(map[int]ExtractedData)
 	c := colly.NewCollector(
 		colly.AllowedDomains("id.my-best.com"),
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"),
 	)
-
 	c.OnHTML("table[data-testid='comparison-table'] tbody tr", func(e *colly.HTMLElement) {
 		rankText := cleanText(e.DOM.Find("td").Eq(0))
 		rank := extractRankInt(rankText)
 		if rank > 0 {
 			var shopeeLink string
-			e.DOM.Find("td").Eq(3).Find("a").Each(func(_ int, s *goquery.Selection) {
-				href, exists := s.Attr("href")
-				if exists {
+			e.DOM.Find("a").Each(func(_ int, s *goquery.Selection) {
+				if href, exists := s.Attr("href"); exists {
 					processedLink := processShopeeLink(href)
-					if processedLink != "" {
+					if processedLink != "" && shopeeLink == "" {
 						shopeeLink = processedLink
-						return
 					}
 				}
 			})
-			point := cleanText(e.DOM.Find("td").Eq(4))
-			htmlDataMap[rank] = HtmlExtraData{Point: point, ShopeeLink: shopeeLink}
+			shopeeLinksMap[rank] = shopeeLink
 		}
 	})
+	rankCounter := 1
+	c.OnHTML("div[id^='ranking-']", func(e *colly.HTMLElement) {
+		pointText := cleanText(e.DOM.Find("h4.css-1pz1zof").First())
+		var pointList []string
+		e.DOM.Find("div.css-x9ntr5 li").Each(func(_ int, s *goquery.Selection) {
+			proText := cleanText(s)
+			if proText != "" {
+				pointList = append(pointList, proText)
+			}
+		})
+		if len(pointList) == 0 {
+			e.DOM.Find("div.css-x9ntr5 p, div.css-x9ntr5 span").Each(func(_ int, s *goquery.Selection) {
+				proText := cleanText(s)
+				if proText != "" {
+					pointList = append(pointList, proText)
+				}
+			})
+		}
+		titleText := cleanText(e.DOM.Find("h2, h3").First())
+		rank := extractRankInt(titleText)
+		if rank == 0 {
+			rank = rankCounter
+		}
+		extractedDataMap[rank] = ExtractedData{
+			Point:     pointText,
+			PointList: pointList,
+		}
 
+		rankCounter++
+	})
 	c.OnHTML("script[type='application/ld+json']", func(e *colly.HTMLElement) {
 		content := e.Text
 		if strings.Contains(content, "BreadcrumbList") {
@@ -491,7 +522,6 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 			var art JsonArticle
 			if err := json.Unmarshal([]byte(content), &art); err == nil {
 				detail.Title = art.Headline
-
 				for _, entity := range art.MainEntity {
 					if entity.Type == "ItemList" {
 						for _, item := range entity.ItemListElement {
@@ -508,25 +538,22 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 								productName = strings.TrimPrefix(productName, brandName)
 								productName = strings.TrimSpace(productName)
 							}
-
 							imgURL := ""
 							if len(item.Item.Image) > 0 {
 								imgURL = item.Item.Image[0]
 							}
-							images := item.Item.Image
-							rawPrice := item.Item.Offers.LowPrice
-							priceFormatted := formatRupiah(rawPrice)
-							extras := htmlDataMap[rank]
-
+							priceFormatted := formatRupiah(item.Item.Offers.LowPrice)
+							extraData := extractedDataMap[rank]
 							prod := ProductComparison{
 								Rank:        rank,
 								BrandName:   brandName,
 								ProductName: productName,
 								Price:       priceFormatted,
-								Images:      images,
+								Images:      item.Item.Image,
 								ImageURL:    imgURL,
-								Point:       extras.Point,
-								ShopeeLink:  extras.ShopeeLink,
+								Point:       extraData.Point,
+								PointList:   extraData.PointList,
+								ShopeeLink:  shopeeLinksMap[rank],
 							}
 							detail.Products = append(detail.Products, prod)
 						}
@@ -535,6 +562,7 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 			}
 		}
 	})
+
 	fmt.Printf("Scraping detail ID %s!\n", id)
 	c.Visit(fmt.Sprintf("https://id.my-best.com/%s", id))
 	w.Header().Set("Content-Type", "application/json")
