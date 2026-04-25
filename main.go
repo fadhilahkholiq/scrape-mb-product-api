@@ -496,16 +496,11 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 				}
 			})
 		}
-		titleText := cleanText(e.DOM.Find("h2, h3").First())
-		rank := extractRankInt(titleText)
-		if rank == 0 {
-			rank = rankCounter
-		}
+		rank := rankCounter
 		extractedDataMap[rank] = ExtractedData{
 			Point:     pointText,
 			PointList: pointList,
 		}
-
 		rankCounter++
 	})
 	c.OnHTML("script[type='application/ld+json']", func(e *colly.HTMLElement) {
