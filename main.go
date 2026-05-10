@@ -458,10 +458,13 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 	}
 	shopeeLinksMap := make(map[int]string)
 	extractedDataMap := make(map[int]ExtractedData)
+
 	c := colly.NewCollector(
 		colly.AllowedDomains("id.my-best.com"),
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"),
 	)
+
+	// Ekstrak data link Shopee dari tabel
 	c.OnHTML("table[data-testid='comparison-table'] tbody tr", func(e *colly.HTMLElement) {
 		rankText := cleanText(e.DOM.Find("td").Eq(0))
 		rank := extractRankInt(rankText)
@@ -478,31 +481,63 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 			shopeeLinksMap[rank] = shopeeLink
 		}
 	})
-	rankCounter := 1
+
+	// Sistem penanda agar tidak kena jebakan 'div' ganda dari my-best
+	processedIDs := make(map[string]bool)
+
 	c.OnHTML("div[id^='ranking-']", func(e *colly.HTMLElement) {
-		pointText := cleanText(e.DOM.Find("h4.css-1pz1zof").First())
+		idAttr := e.Attr("id")
+
+		// Cegah ekstraksi ganda pada div yang bersarang dengan id yang sama
+		if processedIDs[idAttr] {
+			return
+		}
+		processedIDs[idAttr] = true
+
+		// 1. Ambil rank yang sebenarnya dari atribut data-testid
+		rankElem := e.DOM.Find("div[data-testid^='product-part-rank-']").First()
+		if rankElem.Length() == 0 {
+			return // Bukan blok deskripsi produk
+		}
+
+		rankText, _ := rankElem.Attr("data-testid")
+		rank := extractRankInt(rankText)
+
+		if rank == 0 {
+			return
+		}
+
+		// 2. Ekstrak Point Utama
+		pointText := cleanText(e.DOM.Find("h4").First())
 		var pointList []string
-		e.DOM.Find("div.css-x9ntr5 li").Each(func(_ int, s *goquery.Selection) {
+
+		// 3. Ekstrak Point List (Memprioritaskan tag Paragraf <p>)
+		e.DOM.Find("p").Each(func(_ int, s *goquery.Selection) {
 			proText := cleanText(s)
-			if proText != "" {
+			// Filter string agar tidak mengambil teks yang terlalu pendek atau sama persis dengan judul H4
+			if proText != "" && len(proText) > 35 && proText != pointText {
 				pointList = append(pointList, proText)
 			}
 		})
+
+		// Fallback: Jika di artikel lain mereka memakai format List (<li>)
 		if len(pointList) == 0 {
-			e.DOM.Find("div.css-x9ntr5 p, div.css-x9ntr5 span").Each(func(_ int, s *goquery.Selection) {
+			e.DOM.Find("ul li, ol li").Each(func(_ int, s *goquery.Selection) {
 				proText := cleanText(s)
-				if proText != "" {
+				if proText != "" && len(proText) > 15 {
 					pointList = append(pointList, proText)
 				}
 			})
 		}
-		rank := rankCounter
+
+		// Simpan data di map dengan key 1, 2, 3 (Sinkron sempurna dengan JSON-LD)
 		extractedDataMap[rank] = ExtractedData{
 			Point:     pointText,
 			PointList: pointList,
 		}
-		rankCounter++
 	})
+
+	// Ekstrak JSON-LD dan gabungkan semua data
 	c.OnHTML("script[type='application/ld+json']", func(e *colly.HTMLElement) {
 		content := e.Text
 		if strings.Contains(content, "BreadcrumbList") {
@@ -524,6 +559,8 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 							brandName := item.Item.Brand.Name
 							fullName := item.Item.Name
 							productName := fullName
+
+							// Bersihkan nama produk dari nama brand
 							if strings.Contains(fullName, "\n") {
 								parts := strings.Split(fullName, "\n")
 								if len(parts) > 1 {
@@ -533,12 +570,16 @@ func handleDetailScrape(w http.ResponseWriter, id string) {
 								productName = strings.TrimPrefix(productName, brandName)
 								productName = strings.TrimSpace(productName)
 							}
+
 							imgURL := ""
 							if len(item.Item.Image) > 0 {
 								imgURL = item.Item.Image[0]
 							}
 							priceFormatted := formatRupiah(item.Item.Offers.LowPrice)
+
+							// Map ke extracted HTML data
 							extraData := extractedDataMap[rank]
+
 							prod := ProductComparison{
 								Rank:        rank,
 								BrandName:   brandName,
@@ -577,7 +618,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"status":  "active",
 		"message": "API is running!",
-		"version": "3.3.0",
+		"version": "3.3.2",
 		"author":  "KF",
 		"endpoints": map[string]string{
 			"list_articles":   "/api",
@@ -596,6 +637,6 @@ func main() {
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/api/", mainRouteHandler)
 	http.HandleFunc("/api", mainRouteHandler)
-	fmt.Println("Server is running!")
+	fmt.Println("Server is running on port 8080!")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
